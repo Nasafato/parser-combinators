@@ -1,5 +1,3 @@
-#![type_length_limit = "16777216"]
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Element {
   name: String,
@@ -46,6 +44,25 @@ type ParseResult<'a, Output> = Result<(&'a str, Output), &'a str>;
 
 trait Parser<'a, Output> {
   fn parse(&self, input: &'a str) -> ParseResult<'a, Output>;
+
+  fn map<F, NewOutput>(self, map_fn: F) -> BoxedParser<'a, NewOutput>
+  where
+    Self: Sized + 'a,
+    Output: 'a,
+    NewOutput: 'a,
+    F: Fn(Output) -> NewOutput + 'a,
+  {
+    BoxedParser::new(map(self, map_fn))
+  }
+
+  fn pred<F>(self, pred_fn: F) -> BoxedParser<'a, Output>
+  where
+    Self: Sized + 'a,
+    Output: 'a,
+    F: Fn(&Output) -> bool + 'a,
+  {
+    BoxedParser::new(pred(self, pred_fn))
+  }
 }
 
 // so we're implementing the Parser trait for all types that conform to the trait bound
@@ -248,16 +265,14 @@ fn space0<'a>() -> impl Parser<'a, Vec<char>> {
 }
 
 fn quoted_string<'a>() -> impl Parser<'a, String> {
-  map(
-    right(
+  right(
+    match_literal("\""),
+    left(
+      zero_or_more(any_char.pred(|c| *c != '"')),
       match_literal("\""),
-      left(
-        zero_or_more(pred(any_char, |c| *c != '"')),
-        match_literal("\""),
-      ),
     ),
-    |chars| chars.into_iter().collect(),
   )
+  .map(|chars| chars.into_iter().collect())
 }
 
 #[test]
@@ -295,14 +310,11 @@ fn element_start<'a>() -> impl Parser<'a, (String, Vec<(String, String)>)> {
 }
 
 fn single_element<'a>() -> impl Parser<'a, Element> {
-  map(
-    left(element_start(), match_literal("/>")),
-    |(name, attributes)| Element {
-      name,
-      attributes,
-      children: vec![],
-    },
-  )
+  left(element_start(), match_literal("/>")).map(|(name, attributes)| Element {
+    name,
+    attributes,
+    children: vec![],
+  })
 }
 
 #[test]
